@@ -33,8 +33,7 @@
     } while ((double)(current - start) / CLOCKS_PER_SEC < dly);
 
 uint16_t tetrisFrame[TETRIS_HEIGHT];
-uint16_t tetrisEmptyBlock[BLOCK_NUMBER] =
-    {0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
+
 uint16_t tetrisBlocks[BLOCK_NUMBER][CHUNK_HEIGHT] =
     {
         {0x0000, 0x0180, 0x0180, 0x0000, 0x0000},
@@ -63,21 +62,35 @@ uint16_t tetrisBlocks[BLOCK_NUMBER][CHUNK_HEIGHT] =
 const char *messageBox[2] =
     {
         "Press Space R to start a game",
-        "You lose!Press R to restart a new game or press Esc to quit"};
+        "Game Over! Press R to restart a new game or press Esc to quit"};
 
-int curBlockLevel;
-int curBlockCentreXcor;
-int curBlockType;
-float curFallSpeed = NORMAL_FALL_SPEED;
+struct
+{
+    int level;
+    int Xcor;
+    int type;
+    float speed;
+} blockStatus;
+uint16_t curBlock[CHUNK_HEIGHT];
+
+enum
+{
+    INIT = 1,
+    BOOT = 2,
+    RESET = 3,
+    GAME = 3,
+    EXIT = 4,
+} gameStatus;
+
 int isExit;
 int isInit;
 int isBoot;
 int score;
-uint16_t curBlock[CHUNK_HEIGHT];
 
 int getBit(int x, int y)
 {
-    if ((y - curBlockLevel > CHUNK_HEIGHT - 1 || y - curBlockLevel < 0) || isInit)
+    /* If the bit is outside chunk, only need to consider single frame*/
+    if ((y - blockStatus.level > CHUNK_HEIGHT - 1 || y - blockStatus.level < 0))
     {
         if (((tetrisFrame[y] & (uint16_t)1 << (15 - x)) != 0))
         {
@@ -90,8 +103,8 @@ int getBit(int x, int y)
     }
     else
     {
-        if ((((tetrisFrame[y] | curBlock[y - curBlockLevel]) & (uint16_t)1 << (15 - x)) != 0 && !isInit))
-        // if terrain or block occupy the current position
+        /*If the bit is inside the chunk, consider the intersection of the frame and the chunk*/
+        if ((((tetrisFrame[y] | curBlock[y - blockStatus.level]) & (uint16_t)1 << (15 - x)) != 0))
         {
             return BLOCK_BIT;
         }
@@ -106,14 +119,17 @@ void printBit(int x, int y)
 {
     if (getBit(x, y))
     {
+        /*this is the character for an solid bit*/
         printf("%s", "\u25A0");
     }
     else
     {
+        /*this is the character for an empty bit*/
         printf("%s", "\u25A1");
     }
 }
 
+/*Move the printing console to the target position*/
 void setConsoleStatus(int x, int y, int color)
 {
     static COORD coor;
@@ -123,8 +139,9 @@ void setConsoleStatus(int x, int y, int color)
     SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coor);
 }
 
+/*Render a rectangle bits area given the position at four corners in given color*/
 void render(int startLevel, int endLevel, int startCol, int endCol, int color)
-// render an given rectangle area
+
 {
     for (int y = startLevel; y < endLevel; y++)
     {
@@ -132,17 +149,27 @@ void render(int startLevel, int endLevel, int startCol, int endCol, int color)
         {
             setConsoleStatus(x, y, color);
             if (y > 2)
-            // render the part below ceiling
+            /*Render the part below ceiling*/
             {
                 printBit(x, y);
             }
             else
-            // render the ceiling
+            /*render the ceiling*/
             {
                 printf("%s", "\u25A0");
             }
         }
     }
+}
+/*Render and update the chunk*/
+void eventRenderChunk()
+{
+    render(blockStatus.level - 1, blockStatus.level + CHUNK_HEIGHT, blockStatus.Xcor - 3, blockStatus.Xcor + 4, WHITE);
+}
+/*Reset and render the whole frame*/
+void eventResetRender()
+{
+    render(0, TETRIS_HEIGHT, 0, 16, WHITE);
 }
 
 void showMessage(int messageIndex)
@@ -157,6 +184,12 @@ void showScore()
     printf("Score:%d", score);
 }
 
+void clearScore()
+{
+    setConsoleStatus(20, 10, WHITE);
+    printf("                    ");
+}
+
 void clearMessage()
 {
     setConsoleStatus(20, 8, WHITE);
@@ -167,7 +200,7 @@ int isHit(uint16_t *chunk)
 {
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
-        if ((chunk[i] & tetrisFrame[i + curBlockLevel]) != 0)
+        if ((chunk[i] & tetrisFrame[i + blockStatus.level]) != 0)
         {
             return 1;
         }
@@ -186,16 +219,16 @@ void setAbsBit(uint16_t *matrix, int xAbsCor, int yAbsCor) // Set the bit based 
     matrix[yAbsCor] |= (uint16_t)1 << (15 - xAbsCor);
 }
 
-void rotate()
+void chunkRotate()
 {
     uint16_t tempMatrix[CHUNK_HEIGHT] = {0};
-    for (int x = curBlockCentreXcor - 2; x < curBlockCentreXcor + 3; x++)
+    for (int x = blockStatus.Xcor - 2; x < blockStatus.Xcor + 3; x++)
     {
         for (int y = 0; y < CHUNK_HEIGHT; y++)
         {
             if ((curBlock[y] & (uint16_t)1 << (15 - x)) != 0)
             {
-                setAbsBit(tempMatrix, curBlockCentreXcor + (y - DEFAULT_CENTRE_YCOR), DEFAULT_CENTRE_YCOR - (x - curBlockCentreXcor));
+                setAbsBit(tempMatrix, blockStatus.Xcor + (y - DEFAULT_CENTRE_YCOR), DEFAULT_CENTRE_YCOR - (x - blockStatus.Xcor));
             }
         }
     }
@@ -210,18 +243,13 @@ void rotate()
     }
 }
 
-void eventRenderChunk() // render the chunk
-{
-    render(curBlockLevel - 1, curBlockLevel + CHUNK_HEIGHT, curBlockCentreXcor - 3, curBlockCentreXcor + 4, WHITE);
-}
-
 void keyboardGameHandle() // handle the press event if a key is pressed
 {
     char keyPress;
     keyPress = getch();
     if (keyPress == 27)
     {
-        isExit = 1;
+        gameStatus = EXIT;
     }
     else if (keyPress == 'a' || keyPress == 'A')
     {
@@ -229,7 +257,7 @@ void keyboardGameHandle() // handle the press event if a key is pressed
         {
             curBlock[i] = curBlock[i] << 1;
         }
-        curBlockCentreXcor--;
+        blockStatus.Xcor--;
 
         if (isHit(curBlock))
         {
@@ -237,7 +265,7 @@ void keyboardGameHandle() // handle the press event if a key is pressed
             {
                 curBlock[i] = curBlock[i] >> 1;
             }
-            curBlockCentreXcor++;
+            blockStatus.Xcor++;
         }
     }
     else if (keyPress == 'd' || keyPress == 'D')
@@ -246,7 +274,7 @@ void keyboardGameHandle() // handle the press event if a key is pressed
         {
             curBlock[i] = curBlock[i] >> 1;
         }
-        curBlockCentreXcor++;
+        blockStatus.Xcor++;
 
         if (isHit(curBlock))
         {
@@ -254,18 +282,18 @@ void keyboardGameHandle() // handle the press event if a key is pressed
             {
                 curBlock[i] = curBlock[i] << 1;
             }
-            curBlockCentreXcor--;
+            blockStatus.Xcor--;
         }
     }
     else if (keyPress == 's' || keyPress == 'S')
     {
-        curFallSpeed = ACE_FALL_SPEED;
+        blockStatus.speed = ACE_FALL_SPEED;
     }
     else if (keyPress == 'w' || keyPress == 'W')
     {
-        if (curBlockType != 0) // no need to rotate the first block
+        if (blockStatus.type != 0) // no need to chunkRotate the first block
         {
-            rotate();
+            chunkRotate();
         }
     }
     eventRenderChunk();
@@ -277,23 +305,27 @@ void eventOneRoundHandle()
     int counterFall = 0;
     while (1) // the block falls every frame
     {
-        if (curBlockLevel >= TETRIS_HEIGHT - 3 && isExit)
+        if (blockStatus.level >= TETRIS_HEIGHT - 3)
+        {
+            break;
+        }
+        if (gameStatus == EXIT)
         {
             break;
         }
         if (isHit(curBlock)) // if the block is falling on the terrain
         {
-            curBlockLevel--;
+            blockStatus.level--;
             eventRenderChunk();
             break; // upshift the position by one
         }
-        if (++counterFall > CLOCKS_PER_SEC / 10 * 1 / curFallSpeed) // the blocks fall
+        if (++counterFall > CLOCKS_PER_SEC / (10 * blockStatus.speed)) // the blocks fall
         {
             counterFall = 0;
-            curBlockLevel++;
+            blockStatus.level++;
             eventRenderChunk();
         }
-        if (curBlockLevel < 3)
+        if (blockStatus.level < 3)
         {
             isKeyboardLock = 1;
         }
@@ -307,19 +339,19 @@ void eventOneRoundHandle()
         }
         else
         {
-            curFallSpeed = NORMAL_FALL_SPEED; // no 's' is pressed down, resetBlock the speed
+            blockStatus.speed = NORMAL_FALL_SPEED; // no 's' is pressed down, resetBlock the speed
         }
 
         DELAY_SEC(0.01);
     }
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
-        tetrisFrame[i + curBlockLevel] |= curBlock[i]; // add the pile-up block into the terrain!
+        tetrisFrame[i + blockStatus.level] |= curBlock[i]; // add the pile-up block into the terrain!
         eventRenderChunk();
     }
 }
 
-void eventTetrisFrameInit()
+void eventTetrisFrameReset()
 {
     for (int i = 0; i < TETRIS_HEIGHT - 3; i++)
     {
@@ -353,7 +385,7 @@ void generateSeeds(int array[], int length)
 
 void eventGenerateRandomSeeds()
 {
-    if (isInit)
+    if (gameStatus == INIT)
     {
         generateSeeds(blockSeeds, BLOCK_NUMBER);
         generateSeeds(blockSeedsNext, BLOCK_NUMBER);
@@ -377,34 +409,31 @@ void eventChooseBlock()
 
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
-        curBlockType = blockSeeds[curBlockCount];
-        curBlock[i] = tetrisBlocks[curBlockType][i]; // resetBlock current blocks
+        blockStatus.type = blockSeeds[curBlockCount];
+        curBlock[i] = tetrisBlocks[blockStatus.type][i]; // resetBlock current blocks
     }
     curBlockCount++;
 }
 
 void eventBlockStatusReset()
 {
-    curBlockLevel = 0; // resetBlock and init new status of the block
-    curBlockCentreXcor = DEFAULT_CENTRE_INIT_XCOR;
-    curFallSpeed = NORMAL_FALL_SPEED;
+    blockStatus.level = 0; // resetBlock and init new status of the block
+    blockStatus.Xcor = DEFAULT_CENTRE_INIT_XCOR;
+    blockStatus.speed = NORMAL_FALL_SPEED;
 }
 
 void eventGameReset()
 {
-    isInit = 1;
-    SetConsoleTitle("Tetris");
-    eventTetrisFrameInit();
-    render(0, TETRIS_HEIGHT, 0, 16, WHITE);
-    curBlockCentreXcor = DEFAULT_CENTRE_INIT_XCOR;
-    curBlockLevel = 0;
-    score = 0;
+    eventTetrisFrameReset();
+    eventBlockStatusReset();
+    eventResetRender();
     eventGenerateRandomSeeds(blockSeeds, BLOCK_NUMBER);
-    isInit = 0;
+    score = 0;
 }
 
 void eventEliminateBlock()
 {
+    uint16_t tetrisEmptyBlock[BLOCK_NUMBER] = {0};
     int eliminateCount = 0;
     for (int i = 3; i < TETRIS_HEIGHT - 4; i++)
     {
@@ -442,17 +471,16 @@ void keyboardBootHandle()
     keyPress = getch();
     if (keyPress == 27)
     {
-        isExit = 1;
+        gameStatus = EXIT;
     }
     else if (keyPress == 'R' || keyPress == 'r')
     {
-        isBoot = 0;
+        gameStatus = GAME;
     }
 }
 void eventGameBoot(int statusIndex)
 {
     int showFlag = 0;
-    isBoot = 1;
     while (1)
     {
         if (!showFlag)
@@ -461,12 +489,12 @@ void eventGameBoot(int statusIndex)
             showFlag = 1;
         }
 
-        if (!isBoot)
+        if (gameStatus == GAME)
         {
             clearMessage();
             break;
         }
-        if (isExit)
+        if (gameStatus == EXIT)
         {
             break;
         }
@@ -477,21 +505,34 @@ void eventGameBoot(int statusIndex)
     }
 }
 
+void eventGameInit()
+{
+    gameStatus = INIT;
+    SetConsoleTitle("Tetris");
+    eventTetrisFrameReset();
+    eventBlockStatusReset();
+    eventResetRender();
+    eventGenerateRandomSeeds(blockSeeds, BLOCK_NUMBER);
+
+    score = 0;
+    gameStatus = BOOT;
+}
+
 int main()
 {
-    eventGameReset();
+    eventGameInit();
     showScore();
     eventGameBoot(0);
     while (1)
     {
 
-        if (isExit)
+        if (gameStatus == EXIT)
         {
             break;
         }
         while (1)
         {
-            if (isExit)
+            if (gameStatus == EXIT)
             {
                 break;
             }
@@ -502,6 +543,8 @@ int main()
             {
                 eventGameBoot(1);
                 eventGameReset();
+                clearScore();
+                showScore();
                 break;
             }
             else
