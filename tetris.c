@@ -148,6 +148,9 @@ enum
     EXIT = 4,
 } gameStatus;
 
+int blockSeeds[7];
+int blockSeedsNext[7];
+
 int getBit(int x, int y)
 {
     /* If the bit is outside chunk, only need to consider single frame*/
@@ -180,12 +183,12 @@ void printBit(int x, int y)
 {
     if (getBit(x, y))
     {
-        /*this is the character for an solid bit*/
+        /*This is the character for an solid bit*/
         printf("%s", "\u25A0");
     }
     else
     {
-        /*this is the character for an empty bit*/
+        /*This is the character for an empty bit*/
         printf("%s", "\u25A1");
     }
 }
@@ -251,17 +254,55 @@ void showData()
     setConsoleStatus(0, 0, WHITE);
 }
 
+int getNextBlockBit(int x, int y, int type)
+{
+    if ((tetrisBlocks[type][y] & (uint16_t)1 << (15 - x)) != 0)
+    {
+        return BLOCK_BIT;
+    }
+    else
+    {
+        return SPACE_BIT;
+    }
+}
+
+int getNextBlockType()
+{
+    if (blockStatus.count == 6)
+    {
+        return blockSeedsNext[0];
+    }
+    else
+    {
+        return blockSeeds[blockStatus.count + 1];
+    }
+}
+
 void showNextBlock()
 {
     setConsoleStatus(20, 2, WHITE);
     printf("Next Block:");
-    setConsoleStatus(20, 4, WHITE);
+    int type = getNextBlockType();
+    for (int y = 1; y < 3; y++)
+    {
+        for (int x = 0; x < 16; x++)
+        {
+            setConsoleStatus(20 + x, y + 2, WHITE);
+            if (getNextBlockBit(x, y, type))
+            {
+                printf("%s", "\u25A0");
+            }
+        }
+    }
     setConsoleStatus(0, 0, WHITE);
 }
 
 void clearNextBlock()
 {
-    setConsoleStatus(20, 4, WHITE)
+    setConsoleStatus(20, 3, WHITE);
+    printf("                                                               ");
+    setConsoleStatus(20, 4, WHITE);
+    printf("                                                               ");
 }
 void clearData()
 {
@@ -441,9 +482,6 @@ void eventTetrisFrameReset()
     }
 }
 
-int blockSeeds[7];
-int blockSeedsNext[7];
-
 void generateSeeds(int array[], int length)
 {
     for (int i = 0; i < length; i++)
@@ -489,10 +527,12 @@ void eventChooseBlock()
         blockStatus.type = blockSeeds[blockStatus.count];
         curBlock[i] = tetrisBlocks[blockStatus.type][i]; // resetBlock current blocks
     }
+    clearNextBlock();
+    showNextBlock();
     blockStatus.count++;
 }
 
-void blockStatusReset()
+void blockStatusReset() 2
 {
     blockStatus.Ycor = 0; // resetBlock and init new status of the block
     blockStatus.Xcor = DEFAULT_CENTRE_INIT_XCOR;
@@ -636,7 +676,6 @@ int main()
     eventGameBoot(START);
     while (1)
     {
-
         if (gameStatus == EXIT)
         {
             break;
