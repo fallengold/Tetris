@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <conio.h>
 #include <time.h>
-#include <math.h>
 
 #define SPACE_BIT 0
 #define BLOCK_BIT 1
@@ -247,11 +246,21 @@ void showMessage(int x, int y, int messageIndex)
 
 void showData()
 {
-    setConsoleStatus(20, 14, WHITE);
-    printf("Score:%d", gameData.score);
     setConsoleStatus(20, 16, WHITE);
+    printf("Score:%d", gameData.score);
+    setConsoleStatus(20, 18, WHITE);
     printf("Level:%d", gameData.level);
     setConsoleStatus(0, 0, WHITE);
+}
+
+void showControl()
+{
+    setConsoleStatus(20, 22, WHITE);
+    printf("Control:");
+    setConsoleStatus(20, 24, WHITE);
+    printf("A move left | D move right");
+    setConsoleStatus(20, 26, WHITE);
+    printf("S fall down | W rotate");
 }
 
 int getNextBlockBit(int x, int y, int type)
@@ -287,7 +296,7 @@ void showNextBlock()
     {
         for (int x = 0; x < 16; x++)
         {
-            setConsoleStatus(20 + x, y + 2, WHITE);
+            setConsoleStatus(14 + x, y + 3, WHITE);
             if (getNextBlockBit(x, y, type))
             {
                 printf("%s", "\u25A0");
@@ -299,10 +308,11 @@ void showNextBlock()
 
 void clearNextBlock()
 {
-    setConsoleStatus(20, 3, WHITE);
-    printf("                                                               ");
     setConsoleStatus(20, 4, WHITE);
     printf("                                                               ");
+    setConsoleStatus(20, 5, WHITE);
+    printf("                                                               ");
+    setConsoleStatus(0, 0, WHITE);
 }
 void clearData()
 {
@@ -532,7 +542,7 @@ void eventChooseBlock()
     blockStatus.count++;
 }
 
-void blockStatusReset() 2
+void blockStatusReset()
 {
     blockStatus.Ycor = 0; // resetBlock and init new status of the block
     blockStatus.Xcor = DEFAULT_CENTRE_INIT_XCOR;
@@ -651,14 +661,27 @@ void eventGameBoot(enum _showIdentifier_ showIdentifier)
     }
 }
 
+void setConsoleSize(int cols, int lines)
+{
+    HANDLE hOut;
+    hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    /*Set output buffer size*/
+    COORD bufSiz = {cols, lines};
+    SetConsoleScreenBufferSize(hOut, bufSiz);
+    /*Set console window size*/
+    const SMALL_RECT sm = {0, 0, cols - 1, lines - 1};
+    SetConsoleWindowInfo(hOut, 1, &sm);
+}
+
 void eventGameInit()
 {
     gameStatus = INIT;
 
     setbuf(stdin, inputBuf);
-    SetConsoleTitle("Tetris");
-    system("@chcp 65001>nul");
+    setConsoleSize(80, 30);
+    SetConsoleTitle("Tetris1.0");
 
+    system("@chcp 65001>nul");
     eventTetrisFrameReset();
     eventRenderAll();
     eventGenerateRandomSeeds(blockSeeds, BLOCK_NUMBER);
@@ -673,6 +696,7 @@ int main()
 {
     eventGameInit();
     showData();
+    showControl();
     eventGameBoot(START);
     while (1)
     {
