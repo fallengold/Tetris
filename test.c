@@ -3,26 +3,30 @@
 #include <conio.h>
 #include <stdint.h>
 
-
-uint16_t testMatrix[4]=
-{
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    
-};
-
-void setRelBit(uint16_t *matrix, int xAbsCor, int yAbsCor) // Set the bit based on relative frame with the centre of the current block centre;
-{
-    matrix[yAbsCor] |= (uint16_t)1<<(15 - xAbsCor);
-}
+#define ADD_ONE_ROUND_SCORE(count, score) \
+    {                                     \
+        switch (count)                    \
+        {                                 \
+        case 1:                           \
+            (*score) += 2;                \
+            break;                        \
+        case 2:                           \
+            (*score) += 3;                \
+            break;                        \
+        case 3:                           \
+            (*score) += 4;                \
+            break;                        \
+        case 4:                           \
+            (*score) += 5;                \
+            break;                        \
+        default:                          \
+            (*score) += 0;                \
+        };                                \
+    }
 
 int main()
 {
-    setRelBit(testMatrix, 2, 2);
-    for(int i = 0; i < 4; i++)
-    {
-        printf("%d\n", testMatrix[i]);
-    }
+    int score = 0;
+    ADD_ONE_ROUND_SCORE(4, &score);
+    printf("%d", score);
 }

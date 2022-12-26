@@ -11,26 +11,81 @@
 #define DEFAULT_CENTRE_YCOR 2
 #define DEFAULT_CENTRE_INIT_XCOR 7
 
+/*Define numeric mimic parameters for the scene*/
 #define WALL ((uint16_t)0xe007)
 #define FLOOR ((uint16_t)0xffff)
 #define TETRIS_HEIGHT 27
 #define CHUNK_HEIGHT 5
+
+/*Define the block numbers*/
 #define BLOCK_NUMBER 7
 
-#define NORMAL_FALL_SPEED 1.5
-#define ACE_FALL_SPEED 30
+/*Define fall gravity in level 1*/
+#define BASE_NORMAL_GRAVITY ((double)1 / (double)64)
+#define BASE_ACE_GRAVITY ((double)1)
 
+/*Define color parameters*/
 #define WHITE 7
 #define GREY 8
 
-/*A self-defined delay*/
-#define DELAY_SEC(dly)             \
-    const clock_t start = clock(); \
-    clock_t current;               \
-    do                             \
-    {                              \
-        current = clock();         \
-    } while ((double)(current - start) / CLOCKS_PER_SEC < dly);
+#define FPS (double)60
+
+/*Define parametre for score count mechanism */
+#define BASIC_BLOCK_LAND_SCORE 4
+#define BASIC_ONE_LINE_ELIMINATE_SCORE 40
+#define BASIC_TWO_LINE_ELIMINATE_SCORE 100
+#define BASIC_THREE_LINE_ELIMINATE_SCORE 300
+#define BASIC_FOUR_LINE_ELIMINATE_SCORE 1200
+#define LINES_PER_LEVEL 10
+#define MAX_LEVEL 30
+/*A self-defined delay counter*/
+#define DELAY_SEC(dly)                                                \
+    {                                                                 \
+        const clock_t start = clock();                                \
+        clock_t current;                                              \
+        do                                                            \
+        {                                                             \
+            current = clock();                                        \
+        } while (((double)(current - start)) / CLOCKS_PER_SEC < dly); \
+    }
+
+#define ADD_ONE_ROUND_SCORE(count, pScore, level)                  \
+    {                                                              \
+        switch (count)                                             \
+        {                                                          \
+        case 1:                                                    \
+            (*pScore) += BASIC_ONE_LINE_ELIMINATE_SCORE * level;   \
+            break;                                                 \
+        case 2:                                                    \
+            (*pScore) += BASIC_TWO_LINE_ELIMINATE_SCORE * level;   \
+            break;                                                 \
+        case 3:                                                    \
+            (*pScore) += BASIC_THREE_LINE_ELIMINATE_SCORE * level; \
+            break;                                                 \
+        case 4:                                                    \
+            (*pScore) += BASIC_FOUR_LINE_ELIMINATE_SCORE * level;  \
+            break;                                                 \
+        default:                                                   \
+            (*pScore) += 0;                                        \
+        };                                                         \
+    }
+
+#define GET_LEVEL(totalEliminateCount, pLevel)                            \
+    {                                                                     \
+        if (totalEliminateCount < LINES_PER_LEVEL * MAX_LEVEL)            \
+        {                                                                 \
+            (*pLevel) = (int)(totalEliminateCount / LINES_PER_LEVEL) + 1; \
+        }                                                                 \
+        else                                                              \
+        {                                                                 \
+            (*pLevel) = 20;                                               \
+        }                                                                 \
+    }
+
+#define GET_GRAVITY_MODIFIER(level) ((level - 1) * 0.25 + 1)
+
+#define KEYBOARD_BUFSIZ 5
+char inputBuf[KEYBOARD_BUFSIZ];
 
 uint16_t tetrisFrame[TETRIS_HEIGHT];
 
@@ -59,19 +114,30 @@ uint16_t tetrisBlocks[BLOCK_NUMBER][CHUNK_HEIGHT] =
         //     '■' ■
 };
 
-const char *messageBox[2] =
+uint16_t curBlock[CHUNK_HEIGHT];
+
+const char *messageBox[4] =
     {
         "Press Space R to start a game",
-        "Game Over! Press R to restart a new game or press Esc to quit"};
+        "Game Over!",
+        "Press R to restart a new game",
+        "Press Esc to quit"};
 
 struct
 {
-    int level;
+    int Ycor;
     int Xcor;
     int type;
-    float speed;
+    int count;
+    float gravity;
 } blockStatus;
-uint16_t curBlock[CHUNK_HEIGHT];
+
+struct
+{
+    int score;
+    int eliminateCount;
+    int level;
+} gameData;
 
 enum
 {
@@ -82,15 +148,10 @@ enum
     EXIT = 4,
 } gameStatus;
 
-int isExit;
-int isInit;
-int isBoot;
-int score;
-
 int getBit(int x, int y)
 {
     /* If the bit is outside chunk, only need to consider single frame*/
-    if ((y - blockStatus.level > CHUNK_HEIGHT - 1 || y - blockStatus.level < 0))
+    if ((y - blockStatus.Ycor > CHUNK_HEIGHT - 1 || y - blockStatus.Ycor < 0))
     {
         if (((tetrisFrame[y] & (uint16_t)1 << (15 - x)) != 0))
         {
@@ -104,7 +165,7 @@ int getBit(int x, int y)
     else
     {
         /*If the bit is inside the chunk, consider the intersection of the frame and the chunk*/
-        if ((((tetrisFrame[y] | curBlock[y - blockStatus.level]) & (uint16_t)1 << (15 - x)) != 0))
+        if ((((tetrisFrame[y] | curBlock[y - blockStatus.Ycor]) & (uint16_t)1 << (15 - x)) != 0))
         {
             return BLOCK_BIT;
         }
@@ -140,10 +201,10 @@ void setConsoleStatus(int x, int y, int color)
 }
 
 /*Render a rectangle bits area given the position at four corners in given color*/
-void render(int startLevel, int endLevel, int startCol, int endCol, int color)
+void render(int startYcor, int endYcor, int startCol, int endCol, int color)
 
 {
-    for (int y = startLevel; y < endLevel; y++)
+    for (int y = startYcor; y < endYcor; y++)
     {
         for (int x = startCol; x < endCol; x++)
         {
@@ -160,47 +221,73 @@ void render(int startLevel, int endLevel, int startCol, int endCol, int color)
             }
         }
     }
+    /*Set the pointer to the COORD (0, 0) in case of mixture of rendering*/
+    setConsoleStatus(0, 0, WHITE);
 }
 /*Render and update the chunk*/
 void eventRenderChunk()
 {
-    render(blockStatus.level - 1, blockStatus.level + CHUNK_HEIGHT, blockStatus.Xcor - 3, blockStatus.Xcor + 4, WHITE);
+    render(blockStatus.Ycor - 1, blockStatus.Ycor + CHUNK_HEIGHT, blockStatus.Xcor - 3, blockStatus.Xcor + 4, WHITE);
 }
 /*Reset and render the whole frame*/
-void eventResetRender()
+void eventRenderAll()
 {
     render(0, TETRIS_HEIGHT, 0, 16, WHITE);
 }
 
-void showMessage(int messageIndex)
+void showMessage(int x, int y, int messageIndex)
 {
-    setConsoleStatus(20, 8, WHITE);
+    setConsoleStatus(x, y, WHITE);
     printf("%s", messageBox[messageIndex]);
+    setConsoleStatus(0, 0, WHITE);
 }
 
-void showScore()
+void showData()
 {
-    setConsoleStatus(20, 10, WHITE);
-    printf("Score:%d", score);
+    setConsoleStatus(20, 14, WHITE);
+    printf("Score:%d", gameData.score);
+    setConsoleStatus(20, 16, WHITE);
+    printf("Level:%d", gameData.level);
+    setConsoleStatus(0, 0, WHITE);
 }
 
-void clearScore()
+void showNextBlock()
 {
-    setConsoleStatus(20, 10, WHITE);
+    setConsoleStatus(20, 2, WHITE);
+    printf("Next Block:");
+    setConsoleStatus(20, 4, WHITE);
+    setConsoleStatus(0, 0, WHITE);
+}
+
+void clearNextBlock()
+{
+    setConsoleStatus(20, 4, WHITE)
+}
+void clearData()
+{
+    setConsoleStatus(20, 14, WHITE);
     printf("                    ");
+    setConsoleStatus(20, 16, WHITE);
+    printf("                    ");
+    setConsoleStatus(0, 0, WHITE);
 }
 
 void clearMessage()
 {
     setConsoleStatus(20, 8, WHITE);
-    printf("                                                           ");
+    printf("                                                               ");
+    setConsoleStatus(20, 10, WHITE);
+    printf("                                                               ");
+    setConsoleStatus(20, 12, WHITE);
+    printf("                                                               ");
+    setConsoleStatus(0, 0, WHITE);
 }
 
 int isHit(uint16_t *chunk)
 {
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
-        if ((chunk[i] & tetrisFrame[i + blockStatus.level]) != 0)
+        if ((chunk[i] & tetrisFrame[i + blockStatus.Ycor]) != 0)
         {
             return 1;
         }
@@ -208,13 +295,12 @@ int isHit(uint16_t *chunk)
     return 0;
 }
 
-/*To see if current game is losed*/
 int isLose()
 {
     return (tetrisFrame[3] != WALL);
 }
-
-void setAbsBit(uint16_t *matrix, int xAbsCor, int yAbsCor) // Set the bit based on relative frame with the centre of the current block centre;
+/*Set the bit based on relative frame with the centre of the current block centre;*/
+void setAbsBit(uint16_t *matrix, int xAbsCor, int yAbsCor)
 {
     matrix[yAbsCor] |= (uint16_t)1 << (15 - xAbsCor);
 }
@@ -250,6 +336,7 @@ void keyboardGameHandle() // handle the press event if a key is pressed
     if (keyPress == 27)
     {
         gameStatus = EXIT;
+        return;
     }
     else if (keyPress == 'a' || keyPress == 'A')
     {
@@ -287,7 +374,7 @@ void keyboardGameHandle() // handle the press event if a key is pressed
     }
     else if (keyPress == 's' || keyPress == 'S')
     {
-        blockStatus.speed = ACE_FALL_SPEED;
+        blockStatus.gravity = BASE_ACE_GRAVITY;
     }
     else if (keyPress == 'w' || keyPress == 'W')
     {
@@ -301,11 +388,12 @@ void keyboardGameHandle() // handle the press event if a key is pressed
 
 void eventOneRoundHandle()
 {
-    int isKeyboardLock = 0;
     int counterFall = 0;
+    DELAY_SEC(1);
     while (1) // the block falls every frame
     {
-        if (blockStatus.level >= TETRIS_HEIGHT - 3)
+        DELAY_SEC(1 / FPS);
+        if (blockStatus.Ycor >= TETRIS_HEIGHT - 3)
         {
             break;
         }
@@ -313,42 +401,32 @@ void eventOneRoundHandle()
         {
             break;
         }
-        if (isHit(curBlock)) // if the block is falling on the terrain
-        {
-            blockStatus.level--;
-            eventRenderChunk();
-            break; // upshift the position by one
-        }
-        if (++counterFall > CLOCKS_PER_SEC / (10 * blockStatus.speed)) // the blocks fall
+
+        if (++counterFall > 1 / blockStatus.gravity) // the blocks fall
         {
             counterFall = 0;
-            blockStatus.level++;
+            blockStatus.Ycor++;
             eventRenderChunk();
         }
-        if (blockStatus.level < 3)
+        if (isHit(curBlock)) // if the block is falling on the terrain
         {
-            isKeyboardLock = 1;
+            blockStatus.Ycor--;
+            break; // upshift the position by one
         }
-        else
-        {
-            isKeyboardLock = 0;
-        }
-        if (kbhit() && !isKeyboardLock) // detect input
+        if (kbhit()) // detect input
         {
             keyboardGameHandle();
         }
         else
         {
-            blockStatus.speed = NORMAL_FALL_SPEED; // no 's' is pressed down, resetBlock the speed
+            blockStatus.gravity = BASE_NORMAL_GRAVITY * GET_GRAVITY_MODIFIER(gameData.level); // no 's' is pressed down, resetBlock the gravity
         }
-
-        DELAY_SEC(0.01);
     }
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
-        tetrisFrame[i + blockStatus.level] |= curBlock[i]; // add the pile-up block into the terrain!
-        eventRenderChunk();
+        tetrisFrame[i + blockStatus.Ycor] |= curBlock[i]; // add the pile-up block into the terrain!
     }
+    eventRenderChunk();
 }
 
 void eventTetrisFrameReset()
@@ -398,37 +476,44 @@ void eventGenerateRandomSeeds()
     }
 }
 
-int curBlockCount = 0;
 void eventChooseBlock()
 {
-    if (curBlockCount >= 7) // TODO
+    if (blockStatus.count >= 7)
     {
-        curBlockCount = 0;
+        blockStatus.count = 0;
         eventGenerateRandomSeeds();
     }
 
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
-        blockStatus.type = blockSeeds[curBlockCount];
+        blockStatus.type = blockSeeds[blockStatus.count];
         curBlock[i] = tetrisBlocks[blockStatus.type][i]; // resetBlock current blocks
     }
-    curBlockCount++;
+    blockStatus.count++;
 }
 
-void eventBlockStatusReset()
+void blockStatusReset()
 {
-    blockStatus.level = 0; // resetBlock and init new status of the block
+    blockStatus.Ycor = 0; // resetBlock and init new status of the block
     blockStatus.Xcor = DEFAULT_CENTRE_INIT_XCOR;
-    blockStatus.speed = NORMAL_FALL_SPEED;
+    blockStatus.gravity = BASE_NORMAL_GRAVITY;
+}
+
+void gameDataReset()
+{
+    gameData.score = 0;
+    gameData.eliminateCount = 0;
+    gameData.level = 1;
 }
 
 void eventGameReset()
 {
     eventTetrisFrameReset();
-    eventBlockStatusReset();
-    eventResetRender();
+    eventRenderAll();
     eventGenerateRandomSeeds(blockSeeds, BLOCK_NUMBER);
-    score = 0;
+
+    blockStatusReset();
+    gameDataReset();
 }
 
 void eventEliminateBlock()
@@ -454,15 +539,19 @@ void eventEliminateBlock()
     {
         curBlock[i] = tetrisEmptyBlock[i];
     }
-    /*caculate the score in current round*/
+    /*Caculate the score added in current round*/
     if (eliminateCount > 0)
     {
-        score += 100 * pow(2, eliminateCount - 1);
+        ADD_ONE_ROUND_SCORE(eliminateCount, &(gameData.score), gameData.level);
     }
-    /*update the whole frame*/
-    render(0, TETRIS_HEIGHT, 0, 16, WHITE);
-    /*update the score*/
-    showScore();
+    /*Update the whole frame*/
+    eventRenderAll();
+    /*Update the score*/
+    clearData();
+    showData();
+    /*Update the total eliminated block count*/
+    gameData.eliminateCount += eliminateCount;
+    GET_LEVEL(gameData.eliminateCount, &(gameData.level));
 }
 
 void keyboardBootHandle()
@@ -478,14 +567,31 @@ void keyboardBootHandle()
         gameStatus = GAME;
     }
 }
-void eventGameBoot(int statusIndex)
+
+enum _showIdentifier_
 {
+    START = 1,
+    RESTART = 2
+};
+
+void eventGameBoot(enum _showIdentifier_ showIdentifier)
+{
+    gameStatus = BOOT;
     int showFlag = 0;
     while (1)
     {
         if (!showFlag)
         {
-            showMessage(statusIndex);
+            if (showIdentifier == RESTART)
+            {
+                showMessage(20, 8, 1);
+                showMessage(20, 10, 2);
+                showMessage(20, 12, 3);
+            }
+            else if (showIdentifier == START)
+            {
+                showMessage(20, 10, 0);
+            }
             showFlag = 1;
         }
 
@@ -508,21 +614,26 @@ void eventGameBoot(int statusIndex)
 void eventGameInit()
 {
     gameStatus = INIT;
+
+    setbuf(stdin, inputBuf);
     SetConsoleTitle("Tetris");
+    system("@chcp 65001>nul");
+
     eventTetrisFrameReset();
-    eventBlockStatusReset();
-    eventResetRender();
+    eventRenderAll();
     eventGenerateRandomSeeds(blockSeeds, BLOCK_NUMBER);
 
-    score = 0;
+    blockStatusReset();
+    gameDataReset();
+
     gameStatus = BOOT;
 }
 
 int main()
 {
     eventGameInit();
-    showScore();
-    eventGameBoot(0);
+    showData();
+    eventGameBoot(START);
     while (1)
     {
 
@@ -541,16 +652,21 @@ int main()
             eventEliminateBlock();
             if (isLose())
             {
-                eventGameBoot(1);
+                if (gameStatus == EXIT)
+                {
+                    break;
+                }
+                eventGameBoot(RESTART);
                 eventGameReset();
-                clearScore();
-                showScore();
+                clearData();
+                showData();
                 break;
             }
             else
             {
-                eventBlockStatusReset();
+                blockStatusReset();
             }
         }
     }
+    return 0;
 }
