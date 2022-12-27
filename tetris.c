@@ -27,6 +27,7 @@
 #define WHITE 7
 #define GREY 8
 
+/*Define FPS*/
 #define FPS (double)60
 
 /*Define parametre for score count mechanism */
@@ -47,7 +48,8 @@
             current = clock();                                        \
         } while (((double)(current - start)) / CLOCKS_PER_SEC < dly); \
     }
-
+/*Define score calculator in one round*/
+/*Score added = basic socre * current level*/
 #define ADD_ONE_ROUND_SCORE(count, pScore, level)                  \
     {                                                              \
         switch (count)                                             \
@@ -69,6 +71,8 @@
         };                                                         \
     }
 
+/*Define level calculator*/
+/*Level = totalEliminateCount / lines_per_level + 1*/
 #define GET_LEVEL(totalEliminateCount, pLevel)                            \
     {                                                                     \
         if (totalEliminateCount < LINES_PER_LEVEL * MAX_LEVEL)            \
@@ -81,11 +85,14 @@
         }                                                                 \
     }
 
+/*Define modifier calculator formula*/
 #define GET_GRAVITY_MODIFIER(level) ((level - 1) * 0.25 + 1)
 
-#define KEYBOARD_BUFSIZ 5
+/*Define keyboard input buffer */
+#define KEYBOARD_BUFSIZ 1
 char inputBuf[KEYBOARD_BUFSIZ];
 
+/*Define Tetris frame, 7 optional blocks, and current chosen block*/
 uint16_t tetrisFrame[TETRIS_HEIGHT];
 
 uint16_t tetrisBlocks[BLOCK_NUMBER][CHUNK_HEIGHT] =
@@ -115,6 +122,7 @@ uint16_t tetrisBlocks[BLOCK_NUMBER][CHUNK_HEIGHT] =
 
 uint16_t curBlock[CHUNK_HEIGHT];
 
+/*Define candidate output message*/
 const char *messageBox[4] =
     {
         "Press Space R to start a game",
@@ -122,22 +130,24 @@ const char *messageBox[4] =
         "Press R to restart a new game",
         "Press Esc to quit"};
 
+/*Define basic information status of the current block*/
 struct
 {
-    int Ycor;
-    int Xcor;
-    int type;
-    int count;
-    float gravity;
+    int Ycor;      // the block X-coordinate in the frame
+    int Xcor;      // the block Y-coordinate in the frame
+    int type;      // the block type based on the optional blocks chosen sets
+    int count;     // the current block index in current 7-length block sequence
+    float gravity; // g
 } blockStatus;
-
+/*Define game data;*/
 struct
 {
-    int score;
-    int eliminateCount;
-    int level;
+    int score;          // the game score
+    int eliminateCount; // total eliminated line count
+    int level;          // the level status of current processing game-round
 } gameData;
 
+/*Define game processing status*/
 enum
 {
     INIT = 1,
@@ -147,8 +157,12 @@ enum
     EXIT = 4,
 } gameStatus;
 
+/*Define sequences that stores randomly generated block-chosen seeds*/
 int blockSeeds[7];
 int blockSeedsNext[7];
+/*===================================================================================*/
+/*The below sets of function is for printing the game interface*/
+/*===================================================================================*/
 
 int getBit(int x, int y)
 {
@@ -196,6 +210,7 @@ void printBit(int x, int y)
 void setConsoleStatus(int x, int y, int color)
 {
     static COORD coor;
+    /*Have to multiply frame x-cor by 2 to get the proper console x-cor for rendering*/
     coor.X = 2 * x;
     coor.Y = y;
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
@@ -237,10 +252,12 @@ void eventRenderAll()
     render(0, TETRIS_HEIGHT, 0, 16, WHITE);
 }
 
+/*Show basic information*/
 void showMessage(int x, int y, int messageIndex)
 {
     setConsoleStatus(x, y, WHITE);
     printf("%s", messageBox[messageIndex]);
+    /*Remember to set the cursor to 0, 0*/
     setConsoleStatus(0, 0, WHITE);
 }
 
@@ -261,8 +278,10 @@ void showControl()
     printf("A move left | D move right");
     setConsoleStatus(20, 26, WHITE);
     printf("S fall down | W rotate");
+    setConsoleStatus(0, 0, WHITE);
 }
 
+/*The below thre functions is for displaying the next block*/
 int getNextBlockBit(int x, int y, int type)
 {
     if ((tetrisBlocks[type][y] & (uint16_t)1 << (15 - x)) != 0)
@@ -306,6 +325,7 @@ void showNextBlock()
     setConsoleStatus(0, 0, WHITE);
 }
 
+/*Clear the information for next printing*/
 void clearNextBlock()
 {
     setConsoleStatus(20, 4, WHITE);
@@ -334,6 +354,11 @@ void clearMessage()
     setConsoleStatus(0, 0, WHITE);
 }
 
+/*=====================================================================*/
+/*Some game mechanism handling methods*/
+/*=====================================================================*/
+
+/*If the block hit the frame*/
 int isHit(uint16_t *chunk)
 {
     for (int i = 0; i < CHUNK_HEIGHT; i++)
@@ -346,16 +371,19 @@ int isHit(uint16_t *chunk)
     return 0;
 }
 
+/*When the block stop falling and reach the ceiling, the game lose*/
 int isLose()
 {
     return (tetrisFrame[3] != WALL);
 }
+
 /*Set the bit based on relative frame with the centre of the current block centre;*/
 void setAbsBit(uint16_t *matrix, int xAbsCor, int yAbsCor)
 {
     matrix[yAbsCor] |= (uint16_t)1 << (15 - xAbsCor);
 }
 
+/*Rotate counterclockwisely the block*/
 void chunkRotate()
 {
     uint16_t tempMatrix[CHUNK_HEIGHT] = {0};
@@ -365,12 +393,13 @@ void chunkRotate()
         {
             if ((curBlock[y] & (uint16_t)1 << (15 - x)) != 0)
             {
+                /*Rotate */
                 setAbsBit(tempMatrix, blockStatus.Xcor + (y - DEFAULT_CENTRE_YCOR), DEFAULT_CENTRE_YCOR - (x - blockStatus.Xcor));
             }
         }
     }
-
-    if (isHit(tempMatrix)) // to check if rotating matrix hit the wall of something
+    /*To check if rotating matrix hit the wall of something. If it is, return and do nothing.*/
+    if (isHit(tempMatrix))
     {
         return;
     }
@@ -380,118 +409,7 @@ void chunkRotate()
     }
 }
 
-void keyboardGameHandle() // handle the press event if a key is pressed
-{
-    char keyPress;
-    keyPress = getch();
-    if (keyPress == 27)
-    {
-        gameStatus = EXIT;
-        return;
-    }
-    else if (keyPress == 'a' || keyPress == 'A')
-    {
-        for (int i = 0; i < CHUNK_HEIGHT; i++)
-        {
-            curBlock[i] = curBlock[i] << 1;
-        }
-        blockStatus.Xcor--;
-
-        if (isHit(curBlock))
-        {
-            for (int i = 0; i < CHUNK_HEIGHT; i++) // resetBlock the status
-            {
-                curBlock[i] = curBlock[i] >> 1;
-            }
-            blockStatus.Xcor++;
-        }
-    }
-    else if (keyPress == 'd' || keyPress == 'D')
-    {
-        for (int i = 0; i < CHUNK_HEIGHT; i++)
-        {
-            curBlock[i] = curBlock[i] >> 1;
-        }
-        blockStatus.Xcor++;
-
-        if (isHit(curBlock))
-        {
-            for (int i = 0; i < CHUNK_HEIGHT; i++) // resetBlock the status
-            {
-                curBlock[i] = curBlock[i] << 1;
-            }
-            blockStatus.Xcor--;
-        }
-    }
-    else if (keyPress == 's' || keyPress == 'S')
-    {
-        blockStatus.gravity = BASE_ACE_GRAVITY;
-    }
-    else if (keyPress == 'w' || keyPress == 'W')
-    {
-        if (blockStatus.type != 0) // no need to chunkRotate the first block
-        {
-            chunkRotate();
-        }
-    }
-    eventRenderChunk();
-}
-
-void eventOneRoundHandle()
-{
-    int counterFall = 0;
-    DELAY_SEC(1);
-    while (1) // the block falls every frame
-    {
-        DELAY_SEC(1 / FPS);
-        if (blockStatus.Ycor >= TETRIS_HEIGHT - 3)
-        {
-            break;
-        }
-        if (gameStatus == EXIT)
-        {
-            break;
-        }
-
-        if (++counterFall > 1 / blockStatus.gravity) // the blocks fall
-        {
-            counterFall = 0;
-            blockStatus.Ycor++;
-            eventRenderChunk();
-        }
-        if (isHit(curBlock)) // if the block is falling on the terrain
-        {
-            blockStatus.Ycor--;
-            break; // upshift the position by one
-        }
-        if (kbhit()) // detect input
-        {
-            keyboardGameHandle();
-        }
-        else
-        {
-            blockStatus.gravity = BASE_NORMAL_GRAVITY * GET_GRAVITY_MODIFIER(gameData.level); // no 's' is pressed down, resetBlock the gravity
-        }
-    }
-    for (int i = 0; i < CHUNK_HEIGHT; i++)
-    {
-        tetrisFrame[i + blockStatus.Ycor] |= curBlock[i]; // add the pile-up block into the terrain!
-    }
-    eventRenderChunk();
-}
-
-void eventTetrisFrameReset()
-{
-    for (int i = 0; i < TETRIS_HEIGHT - 3; i++)
-    {
-        tetrisFrame[i] = WALL;
-    }
-    for (int i = 1; i < 4; i++)
-    {
-        tetrisFrame[TETRIS_HEIGHT - i] = FLOOR;
-    }
-}
-
+/*Shuffle the seeds array*/
 void generateSeeds(int array[], int length)
 {
     for (int i = 0; i < length; i++)
@@ -509,42 +427,173 @@ void generateSeeds(int array[], int length)
     }
 }
 
+/*Generate random seed for block chosen in each round
+ *Make sure 7 different blocks in random order in each cycle*/
 void eventGenerateRandomSeeds()
 {
+    /*During the process of initialization, start-up current round cycle and next round cycle*/
     if (gameStatus == INIT)
     {
         generateSeeds(blockSeeds, BLOCK_NUMBER);
         generateSeeds(blockSeedsNext, BLOCK_NUMBER);
         return;
     }
+    /*Otherwise, copy the next round cycle to current round and generate a new next round cycle*/
     for (int i = 0; i < BLOCK_NUMBER; i++)
     {
         blockSeeds[i] = blockSeedsNext[i];
         generateSeeds(blockSeedsNext, BLOCK_NUMBER);
     }
 }
+/*==================================================================*/
+/*Event handling methods*/
+/*==================================================================*/
 
+/* Handle the press event if a key is pressed*/
+void keyboardGameHandle()
+{
+    char keyPress;
+    keyPress = getch();
+    /*Esc means exit immediately*/
+    if (keyPress == 27)
+    {
+        gameStatus = EXIT;
+        return;
+    }
+    else if (keyPress == 'a' || keyPress == 'A')
+    {
+        for (int i = 0; i < CHUNK_HEIGHT; i++)
+        {
+            curBlock[i] = curBlock[i] << 1;
+        }
+        blockStatus.Xcor--;
+        /*If hit, cancel the action and reset the blockstatus*/
+        if (isHit(curBlock))
+        {
+            for (int i = 0; i < CHUNK_HEIGHT; i++)
+            {
+                curBlock[i] = curBlock[i] >> 1;
+            }
+            blockStatus.Xcor++;
+        }
+    }
+    else if (keyPress == 'd' || keyPress == 'D')
+    {
+        for (int i = 0; i < CHUNK_HEIGHT; i++)
+        {
+            curBlock[i] = curBlock[i] >> 1;
+        }
+        blockStatus.Xcor++;
+        /*If hit, cancel the action and reset the blockstatus*/
+        if (isHit(curBlock))
+        {
+            for (int i = 0; i < CHUNK_HEIGHT; i++) // resetBlock the status
+            {
+                curBlock[i] = curBlock[i] << 1;
+            }
+            blockStatus.Xcor--;
+        }
+    }
+    else if (keyPress == 's' || keyPress == 'S')
+    {
+        blockStatus.gravity = BASE_ACE_GRAVITY;
+    }
+    else if (keyPress == 'w' || keyPress == 'W')
+    {
+        /*no need to chunkRotate the first block*/
+        if (blockStatus.type != 0)
+        {
+            chunkRotate();
+        }
+    }
+    /*Render chunk after handling every keyboard interruption*/
+    eventRenderChunk();
+}
+
+/*Handle the event in the life-cycle for one block*/
+void eventOneRoundHandle()
+{
+    int counterFall = 0;
+    /*Introduce a cooldown period in case of beginning a new whole round process immediately right after the old one */
+    DELAY_SEC(1);
+    while (1)
+    {
+        /*Every frame*/
+        DELAY_SEC(1 / FPS);
+        if (gameStatus == EXIT)
+        {
+            break;
+        }
+        /*The block falls given the assigned gravity*/
+        if (++counterFall > 1 / blockStatus.gravity)
+        {
+            counterFall = 0;
+            blockStatus.Ycor++;
+            eventRenderChunk();
+        }
+        /*If the block is falling on the terrain*/
+        if (isHit(curBlock))
+        {
+            /*Reset the position by one*/
+            blockStatus.Ycor--;
+            break;
+        }
+        /*Detect input in the keyboard buffer*/
+        if (kbhit())
+        {
+            keyboardGameHandle();
+        }
+        else
+        /*No 's' is pressed down, reset to the normal gravity.*/
+        {
+            blockStatus.gravity = BASE_NORMAL_GRAVITY * GET_GRAVITY_MODIFIER(gameData.level); // no 's' is pressed down, resetBlock the gravity
+        }
+    }
+    /*Add the block into the terrain!*/
+    for (int i = 0; i < CHUNK_HEIGHT; i++)
+    {
+        tetrisFrame[i + blockStatus.Ycor] |= curBlock[i];
+    }
+    eventRenderChunk();
+}
+
+/*Reset til an empty tetris frame*/
+void eventTetrisFrameReset()
+{
+    for (int i = 0; i < TETRIS_HEIGHT - 3; i++)
+    {
+        tetrisFrame[i] = WALL;
+    }
+    for (int i = 1; i < 4; i++)
+    {
+        tetrisFrame[TETRIS_HEIGHT - i] = FLOOR;
+    }
+}
+
+/*Choose next block*/
 void eventChooseBlock()
 {
+    /*If the cycle is end, create a new cycle*/
     if (blockStatus.count >= 7)
     {
         blockStatus.count = 0;
         eventGenerateRandomSeeds();
     }
-
+    /*Get current block*/
     for (int i = 0; i < CHUNK_HEIGHT; i++)
     {
         blockStatus.type = blockSeeds[blockStatus.count];
-        curBlock[i] = tetrisBlocks[blockStatus.type][i]; // resetBlock current blocks
+        curBlock[i] = tetrisBlocks[blockStatus.type][i];
     }
     clearNextBlock();
     showNextBlock();
     blockStatus.count++;
 }
 
+/*Reset attribute methods*/
 void blockStatusReset()
 {
-    blockStatus.Ycor = 0; // resetBlock and init new status of the block
+    blockStatus.Ycor = 0;
     blockStatus.Xcor = DEFAULT_CENTRE_INIT_XCOR;
     blockStatus.gravity = BASE_NORMAL_GRAVITY;
 }
@@ -556,6 +605,7 @@ void gameDataReset()
     gameData.level = 1;
 }
 
+/*For replaying a new game*/
 void eventGameReset()
 {
     eventTetrisFrameReset();
@@ -566,6 +616,8 @@ void eventGameReset()
     gameDataReset();
 }
 
+/*For detection and eliminate a full line
+ *Also calculating the score*/
 void eventEliminateBlock()
 {
     uint16_t tetrisEmptyBlock[BLOCK_NUMBER] = {0};
@@ -573,10 +625,12 @@ void eventEliminateBlock()
     for (int i = 3; i < TETRIS_HEIGHT - 4; i++)
     {
 
+        /*Detecting a full line*/
         if (tetrisFrame[i + 1] == 0xffff)
         {
             eliminateCount++;
             tetrisFrame[i + 1] = WALL;
+            /*Imitate the process of the line above fall and fill the gap*/
             for (int j = i; j > 2; j--)
             {
                 uint16_t temp = tetrisFrame[j + 1];
@@ -585,6 +639,7 @@ void eventEliminateBlock()
             }
         }
     }
+    /*Reset the current block*/
     for (int i = 0; i < 5; i++)
     {
         curBlock[i] = tetrisEmptyBlock[i];
@@ -604,6 +659,7 @@ void eventEliminateBlock()
     GET_LEVEL(gameData.eliminateCount, &(gameData.level));
 }
 
+/*Handling the keyboard interruption during the booting period*/
 void keyboardBootHandle()
 {
     char keyPress;
@@ -618,6 +674,7 @@ void keyboardBootHandle()
     }
 }
 
+/*An identifier to display two different modes of messages*/
 enum _showIdentifier_
 {
     START = 1,
@@ -627,17 +684,20 @@ enum _showIdentifier_
 void eventGameBoot(enum _showIdentifier_ showIdentifier)
 {
     gameStatus = BOOT;
+    /*A flag is created to refresh new message only one time to save time*/
     int showFlag = 0;
     while (1)
     {
         if (!showFlag)
         {
+            /*Show restart message*/
             if (showIdentifier == RESTART)
             {
                 showMessage(20, 8, 1);
                 showMessage(20, 10, 2);
                 showMessage(20, 12, 3);
             }
+            /*Show start message*/
             else if (showIdentifier == START)
             {
                 showMessage(20, 10, 0);
@@ -676,11 +736,14 @@ void setConsoleSize(int cols, int lines)
 void eventGameInit()
 {
     gameStatus = INIT;
-
+    /*Set the input buffer*/
     setbuf(stdin, inputBuf);
+    /*Set the Console window and buffer size*/
     setConsoleSize(80, 30);
+    /*Set title*/
     SetConsoleTitle("Tetris1.0");
 
+    /*Set the console decoding to UTF-8*/
     system("@chcp 65001>nul");
     eventTetrisFrameReset();
     eventRenderAll();
@@ -694,25 +757,32 @@ void eventGameInit()
 
 int main()
 {
+    /*Inititialize*/
     eventGameInit();
     showData();
     showControl();
     eventGameBoot(START);
+    /*All game round handling*/
     while (1)
     {
         if (gameStatus == EXIT)
         {
             break;
         }
+        /*One game round handling*/
         while (1)
         {
             if (gameStatus == EXIT)
             {
                 break;
             }
+            /*Choose new block*/
             eventChooseBlock();
+            /*Handle one block round*/
             eventOneRoundHandle();
+            /*Eliminate block and update information and data*/
             eventEliminateBlock();
+            /*Jump into "Game Over" handling if lose*/
             if (isLose())
             {
                 if (gameStatus == EXIT)
@@ -720,6 +790,7 @@ int main()
                     break;
                 }
                 eventGameBoot(RESTART);
+                /*Data Reset*/
                 eventGameReset();
                 clearData();
                 showData();
